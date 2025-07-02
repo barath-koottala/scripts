@@ -54,14 +54,12 @@ Required packages:
 
 The script supports two main modes with different execution options:
 
-### 1. Analysis Mode (Default)
+### 1. Analysis Mode
 
 Analyzes the client IDs without making any database changes.
 
 ```bash
 python find_accounts_with_missing_emails.py analyze
-# or simply
-python find_accounts_with_missing_emails.py
 ```
 
 **What it does:**
@@ -73,7 +71,7 @@ python find_accounts_with_missing_emails.py
 
 **Output Files:**
 - `clients_with_accounts_{timestamp}.csv` - Clients that have accounts (⚠️ DO NOT DELETE)
-- `clients_safe_to_delete_{timestamp}.txt` - Clients safe to delete (no accounts)
+- `clients_safe_to_delete_{timestamp}.csv` - Clients safe to delete (no accounts)
 - `clients_in_entity_table_{timestamp}.csv` - Clients found in entity.entity table
 - **No rollback script generated** (no deletion operations planned)
 
@@ -97,6 +95,7 @@ python find_accounts_with_missing_emails.py delete
 
 **Output Files:**
 - All analysis files (same as analysis mode)
+- `backup_tables_creation_{timestamp}.sql` - SQL script to create backup tables
 - `rollback_deletion_{timestamp}.sql` - Recovery script for review
 
 **Sample Output:**
@@ -182,12 +181,13 @@ Each backup table includes original columns plus audit columns:
 ### Analysis Files
 ```
 clients_with_accounts_20250702_143045.csv      # Clients with accounts (don't delete)
-clients_safe_to_delete_20250702_143045.txt     # Safe to delete (no accounts)  
+clients_safe_to_delete_20250702_143045.csv     # Safe to delete (no accounts)  
 clients_in_entity_table_20250702_143045.csv    # Found in entity table
 ```
 
 ### Deletion Files
 ```
+backup_tables_creation_20250702_143045.sql               # Backup table creation SQL (created in both dry run and execute modes)
 rollback_deletion_20250702_143045.sql                    # Recovery script (created in both dry run and execute modes)
 ```
 
@@ -285,6 +285,7 @@ INFO -   Clients in entity.entity table: 156
 ```
 INFO - 🚨 EXECUTING ACTUAL DELETION - This will modify the database!
 INFO - ✓ Created backup tables: account.virtual_account_holder_deletion_backup_20250702_143045, entity.entity_deletion_backup_20250702_143045
+INFO - ✓ Generated backup table creation script: backup_tables_creation_20250702_143045.sql
 INFO - ✓ Backed up 0 virtual_account_holder records to virtual_account_holder_deletion_backup_20250702_143045
 INFO - ✓ Backed up 156 entity records to entity_deletion_backup_20250702_143045
 INFO - ✓ Deleted 0 records from account.virtual_account_holder

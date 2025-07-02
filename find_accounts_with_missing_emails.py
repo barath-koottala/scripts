@@ -382,6 +382,10 @@ class MissingEmailAnalyzer:
             else:
                 logger.info(f"✓ No clients found in entity.entity table")
             
+            # Generate CSV files for analysis (same as analyze mode)
+            client_ids_without_accounts = set(client_ids)  # All clients have no accounts at this point
+            self.write_results_to_files(clients_with_accounts, client_ids_without_accounts, clients_in_entity)
+            
             # Generate timestamp for this operation
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             account_backup_table = f"virtual_account_holder_deletion_backup_{timestamp}"
@@ -493,6 +497,15 @@ WHERE entity_id IN ({sample_ids_str}...);"""
                 except Exception as e:
                     logger.warning(f"⚠️ DRY RUN: Could not write rollback script file: {e}")
                 
+                # Generate backup table creation SQL file during dry run
+                backup_sql_file = f'/Users/barath/Farther/scripts/backup_tables_creation_{timestamp}.sql'
+                try:
+                    with open(backup_sql_file, 'w', encoding='utf-8') as f:
+                        f.write(backup_create_sql)
+                    logger.info(f"📄 DRY RUN: Generated backup table creation script: {backup_sql_file}")
+                except Exception as e:
+                    logger.warning(f"⚠️ DRY RUN: Could not write backup table creation script: {e}")
+                
                 # Show expected log output
                 logger.info(f"\n📜 DRY RUN: Expected execution log output:")
                 logger.info(f"  ✓ Created backup tables: account.{account_backup_table}, entity.{entity_backup_table}")
@@ -511,6 +524,28 @@ WHERE entity_id IN ({sample_ids_str}...);"""
             
             # Create backup tables
             account_backup_table, entity_backup_table = self.create_backup_tables(timestamp)
+            
+            # Generate backup table creation SQL file during actual execution too
+            backup_sql_file = f'/Users/barath/Farther/scripts/backup_tables_creation_{timestamp}.sql'
+            try:
+                account_sql = ACCOUNT_BACKUP_TABLE_SQL.format(
+                    account_backup_table=account_backup_table,
+                    timestamp=timestamp
+                )
+                entity_sql = ENTITY_BACKUP_TABLE_SQL.format(
+                    entity_backup_table=entity_backup_table,
+                    timestamp=timestamp
+                )
+                backup_create_sql = DRY_RUN_BACKUP_TABLES_SQL.format(
+                    account_sql=account_sql,
+                    entity_sql=entity_sql
+                )
+                
+                with open(backup_sql_file, 'w', encoding='utf-8') as f:
+                    f.write(backup_create_sql)
+                logger.info(f"✓ Generated backup table creation script: {backup_sql_file}")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not write backup table creation script: {e}")
             
             # Backup records before deletion
             account_backed_up, entity_backed_up = self.backup_records_before_deletion(
@@ -569,16 +604,16 @@ WHERE entity_id IN ({sample_ids_str}...);"""
         except Exception as e:
             logger.error(f"Error writing accounts file: {e}")
         
-        # Write clients WITHOUT accounts to text file
-        safe_delete_file = f'/Users/barath/Farther/scripts/clients_safe_to_delete_{timestamp}.txt'
+        # Write clients WITHOUT accounts to CSV file
+        safe_delete_file = f'/Users/barath/Farther/scripts/clients_safe_to_delete_{timestamp}.csv'
         try:
-            with open(safe_delete_file, 'w', encoding='utf-8') as txtfile:
-                txtfile.write(f"# Clients from missing_emails.csv that have NO accounts\n")
-                txtfile.write(f"# Generated on {datetime.now().isoformat()}\n")
-                txtfile.write(f"# Total: {len(client_ids_without_accounts)} clients\n\n")
+            with open(safe_delete_file, 'w', newline='', encoding='utf-8') as csvfile:
+                fieldnames = ['client_id']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 
+                writer.writeheader()
                 for client_id in sorted(client_ids_without_accounts):
-                    txtfile.write(f"{client_id}\n")
+                    writer.writerow({'client_id': client_id})
             
             logger.info(f"✓ Wrote {len(client_ids_without_accounts)} clients safe to delete to: {safe_delete_file}")
         except Exception as e:
@@ -622,26 +657,34 @@ def main():
     # Path to the CSV file
     csv_file_path = '/Users/barath/Farther/scripts/missing_emails.csv'
     
-    # Check command line arguments for mode
-    mode = 'analyze'  # Default mode
+    # Check command line arguments for mode - require explicit mode
+    if len(sys.argv) < 2:
+        print("Error: Mode argument required")
+        print("Usage:")
+        print("  python find_accounts_with_missing_emails.py analyze           # Run analysis only")
+        print("  python find_accounts_with_missing_emails.py delete            # Dry run deletion")
+        print("  python find_accounts_with_missing_emails.py delete --execute  # Execute actual deletion")
+        sys.exit(1)
+    
+    mode = None
     dry_run = True    # Default to dry run for safety
     
-    if len(sys.argv) > 1:
-        if sys.argv[1] == 'delete':
-            mode = 'delete'
-            if len(sys.argv) > 2 and sys.argv[2] == '--execute':
-                dry_run = False
-                logger.warning("🚨 EXECUTE MODE - This will perform actual deletion!")
-            else:
-                logger.info("🔍 DRY RUN MODE - Use '--execute' flag to perform actual deletion")
-        elif sys.argv[1] == 'analyze':
-            mode = 'analyze'
+    if sys.argv[1] == 'delete':
+        mode = 'delete'
+        if len(sys.argv) > 2 and sys.argv[2] == '--execute':
+            dry_run = False
+            logger.warning("🚨 EXECUTE MODE - This will perform actual deletion!")
         else:
-            print("Usage:")
-            print("  python find_accounts_with_missing_emails.py analyze           # Run analysis only")
-            print("  python find_accounts_with_missing_emails.py delete            # Dry run deletion")
-            print("  python find_accounts_with_missing_emails.py delete --execute  # Execute actual deletion")
-            sys.exit(1)
+            logger.info("🔍 DRY RUN MODE - Use '--execute' flag to perform actual deletion")
+    elif sys.argv[1] == 'analyze':
+        mode = 'analyze'
+    else:
+        print("Error: Invalid mode argument")
+        print("Usage:")
+        print("  python find_accounts_with_missing_emails.py analyze           # Run analysis only")
+        print("  python find_accounts_with_missing_emails.py delete            # Dry run deletion")
+        print("  python find_accounts_with_missing_emails.py delete --execute  # Execute actual deletion")
+        sys.exit(1)
     
     # Create analyzer
     analyzer = MissingEmailAnalyzer(CONNECTION_STRING)
