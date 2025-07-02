@@ -178,7 +178,7 @@ class MissingEmailAnalyzer:
                     logger.info(f"  ✓  Client ID: {client_id} - No accounts found")
             
             # Write results to files
-            self.write_results_to_files(clients_with_accounts, client_ids_without_accounts)
+            self.write_results_to_files(clients_with_accounts, client_ids_without_accounts, clients_in_entity)
             
             return clients_with_accounts
             
@@ -605,7 +605,7 @@ WHERE entity_id NOT IN (
         finally:
             self.disconnect()
 
-    def write_results_to_files(self, clients_with_accounts: List[Dict[str, Any]], client_ids_without_accounts: set):
+    def write_results_to_files(self, clients_with_accounts: List[Dict[str, Any]], client_ids_without_accounts: set, clients_in_entity: List[Dict[str, Any]] = None):
         """Write analysis results to CSV files"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
@@ -642,6 +642,25 @@ WHERE entity_id NOT IN (
             logger.info(f"✓ Wrote {len(client_ids_without_accounts)} clients safe to delete to: {safe_delete_file}")
         except Exception as e:
             logger.error(f"Error writing safe delete file: {e}")
+        
+        # Write clients found in entity table to separate file
+        if clients_in_entity:
+            entity_file = f'/Users/barath/Farther/scripts/clients_in_entity_table_{timestamp}.csv'
+            try:
+                with open(entity_file, 'w', newline='', encoding='utf-8') as csvfile:
+                    # Get all column names from the first entity record
+                    fieldnames = list(clients_in_entity[0].keys()) if clients_in_entity else []
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    
+                    writer.writeheader()
+                    for client in clients_in_entity:
+                        writer.writerow(client)
+                
+                logger.info(f"✓ Wrote {len(clients_in_entity)} clients found in entity.entity to: {entity_file}")
+            except Exception as e:
+                logger.error(f"Error writing entity file: {e}")
+        else:
+            logger.info("No clients found in entity.entity table - no entity file written")
 
 
 def main():
