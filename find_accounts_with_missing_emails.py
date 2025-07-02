@@ -12,8 +12,13 @@ from datetime import datetime
 import sys
 import os
 import csv
-from rollback_script_template import ROLLBACK_SCRIPT_TEMPLATE
-from backup_table_templates import ACCOUNT_BACKUP_TABLE_SQL, ENTITY_BACKUP_TABLE_SQL, DRY_RUN_BACKUP_TABLES_SQL, BACKUP_RECORDS_SQL
+from constants import (
+    ROLLBACK_SCRIPT_TEMPLATE,
+    ACCOUNT_BACKUP_TABLE_SQL,
+    ENTITY_BACKUP_TABLE_SQL,
+    DRY_RUN_BACKUP_TABLES_SQL,
+    BACKUP_RECORDS_SQL
+)
 
 # Configure logging
 logging.basicConfig(

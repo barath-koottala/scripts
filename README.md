@@ -28,6 +28,8 @@ This script processes a CSV file containing client IDs of clients with missing e
    # db_config.py
    DATABASE_URL = "postgresql://username:password@host:port/database?sslmode=require"
    ```
+   
+   ⚠️ **IMPORTANT**: This must be a **production database connection with WRITE permissions** since the script performs actual deletions when run with `--execute`.
 
 2. **Input CSV File**
    ```csv
@@ -296,9 +298,8 @@ INFO - ✅ SUCCESS: All clients successfully deleted
 The script uses a class-based approach with the following key components:
 
 - **`MissingEmailAnalyzer`** - Main class handling all operations
-- **Template files** - External SQL templates for maintainability:
-  - `rollback_script_template.py` - Rollback SQL generation
-  - `backup_table_templates.py` - Backup table creation SQL
+- **`constants.py`** - Centralized SQL templates and configuration constants
+- **Template system** - All SQL generation uses external templates for maintainability
 
 ## Security Considerations
 
