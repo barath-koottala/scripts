@@ -480,6 +480,14 @@ WHERE entity_id IN ({sample_ids_str}...);"""
                 )
                 logger.info(f"```sql\n{rollback_content}\n```")
                 
+                # Actually generate the rollback script file during dry run
+                try:
+                    with open(rollback_file, 'w', encoding='utf-8') as f:
+                        f.write(rollback_content)
+                    logger.info(f"📄 DRY RUN: Generated rollback script file: {rollback_file}")
+                except Exception as e:
+                    logger.warning(f"⚠️ DRY RUN: Could not write rollback script file: {e}")
+                
                 # Show expected log output
                 logger.info(f"\n📜 DRY RUN: Expected execution log output:")
                 logger.info(f"  ✓ Created backup tables: account.{account_backup_table}, entity.{entity_backup_table}")
