@@ -12,6 +12,8 @@ from datetime import datetime
 import sys
 import os
 import csv
+from rollback_script_template import ROLLBACK_SCRIPT_TEMPLATE
+from backup_table_templates import ACCOUNT_BACKUP_TABLE_SQL, ENTITY_BACKUP_TABLE_SQL, DRY_RUN_BACKUP_TABLES_SQL, BACKUP_RECORDS_SQL
 
 # Configure logging
 logging.basicConfig(
@@ -199,42 +201,19 @@ class MissingEmailAnalyzer:
         try:
             with self.conn.cursor() as cur:
                 # Create account backup table
-                create_account_backup_sql = f"""
-                CREATE TABLE IF NOT EXISTS account.{account_backup_table} (
-                    LIKE account.virtual_account_holder INCLUDING ALL
-                );
-                """
-                
-                cur.execute(create_account_backup_sql)
-                
-                # Add metadata columns for account backup
-                alter_account_backup_sql = f"""
-                ALTER TABLE account.{account_backup_table} 
-                ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NOW(),
-                ADD COLUMN IF NOT EXISTS deletion_reason TEXT DEFAULT 'Missing email cleanup',
-                ADD COLUMN IF NOT EXISTS deletion_batch_id TEXT DEFAULT '{table_suffix}';
-                """
-                
-                cur.execute(alter_account_backup_sql)
+                account_sql = ACCOUNT_BACKUP_TABLE_SQL.format(
+                    account_backup_table=account_backup_table,
+                    timestamp=table_suffix
+                )
+                cur.execute(account_sql)
                 
                 # Create entity backup table
-                create_entity_backup_sql = f"""
-                CREATE TABLE IF NOT EXISTS entity.{entity_backup_table} (
-                    LIKE entity.entity INCLUDING ALL
-                );
-                """
+                entity_sql = ENTITY_BACKUP_TABLE_SQL.format(
+                    entity_backup_table=entity_backup_table,
+                    timestamp=table_suffix
+                )
+                cur.execute(entity_sql)
                 
-                cur.execute(create_entity_backup_sql)
-                
-                # Add metadata columns for entity backup
-                alter_entity_backup_sql = f"""
-                ALTER TABLE entity.{entity_backup_table} 
-                ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NOW(),
-                ADD COLUMN IF NOT EXISTS deletion_reason TEXT DEFAULT 'Missing email cleanup',
-                ADD COLUMN IF NOT EXISTS deletion_batch_id TEXT DEFAULT '{table_suffix}';
-                """
-                
-                cur.execute(alter_entity_backup_sql)
                 self.conn.commit()
                 
                 logger.info(f"✓ Created backup tables: account.{account_backup_table}, entity.{entity_backup_table}")
@@ -331,41 +310,12 @@ class MissingEmailAnalyzer:
     def generate_rollback_script(self, account_backup_table: str, entity_backup_table: str, rollback_file_path: str):
         """Generate SQL rollback script to restore deleted records"""
         try:
-            rollback_sql = f"""-- Rollback script for deletion batch: {account_backup_table.split('_')[-1]}
--- Generated on: {datetime.now().isoformat()}
--- 
--- INSTRUCTIONS:
--- 1. Review the records in the backup tables first:
---    SELECT * FROM account.{account_backup_table} ORDER BY person_id;
---    SELECT * FROM entity.{entity_backup_table} ORDER BY entity_id;
--- 2. If you need to restore records, run the INSERT statements below
--- 3. After successful restore, you can drop the backup tables
-
--- Restore deleted virtual_account_holder records
-INSERT INTO account.virtual_account_holder
-SELECT person_id, account_id
-FROM account.{account_backup_table}
-WHERE person_id NOT IN (
-    SELECT person_id FROM account.virtual_account_holder WHERE person_id IS NOT NULL
-);
-
--- Restore deleted entity records
-INSERT INTO entity.entity
-SELECT entity_id, entity_type, entity_subtype, created_at, updated_at, deleted_at
-FROM entity.{entity_backup_table}
-WHERE entity_id NOT IN (
-    SELECT entity_id FROM entity.entity WHERE entity_id IS NOT NULL
-);
-
--- Verify restore (run this to check)
--- SELECT COUNT(*) as restored_account_count FROM account.virtual_account_holder v
--- JOIN account.{account_backup_table} b ON v.person_id = b.person_id;
--- SELECT COUNT(*) as restored_entity_count FROM entity.entity e
--- JOIN entity.{entity_backup_table} b ON e.entity_id = b.entity_id;
-
--- After successful restore, clean up backup tables
--- DROP TABLE account.{account_backup_table};
--- DROP TABLE entity.{entity_backup_table};"""
+            rollback_sql = ROLLBACK_SCRIPT_TEMPLATE.format(
+                batch_id=account_backup_table.split('_')[-1],
+                timestamp=datetime.now().isoformat(),
+                account_backup_table=account_backup_table,
+                entity_backup_table=entity_backup_table
+            )
             
             with open(rollback_file_path, 'w', encoding='utf-8') as f:
                 f.write(rollback_sql)
@@ -468,23 +418,18 @@ WHERE entity_id NOT IN (
                 
                 # Show backup table creation SQL
                 logger.info(f"📜 DRY RUN: Backup tables creation SQL:")
-                backup_create_sql = f"""-- Account backup table
-CREATE TABLE IF NOT EXISTS account.{account_backup_table} (
-    LIKE account.virtual_account_holder INCLUDING ALL
-);
-ALTER TABLE account.{account_backup_table} 
-ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NOW(),
-ADD COLUMN IF NOT EXISTS deletion_reason TEXT DEFAULT 'Missing email cleanup',
-ADD COLUMN IF NOT EXISTS deletion_batch_id TEXT DEFAULT '{timestamp}';
-
--- Entity backup table
-CREATE TABLE IF NOT EXISTS entity.{entity_backup_table} (
-    LIKE entity.entity INCLUDING ALL
-);
-ALTER TABLE entity.{entity_backup_table} 
-ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NOW(),
-ADD COLUMN IF NOT EXISTS deletion_reason TEXT DEFAULT 'Missing email cleanup',
-ADD COLUMN IF NOT EXISTS deletion_batch_id TEXT DEFAULT '{timestamp}';"""
+                account_sql = ACCOUNT_BACKUP_TABLE_SQL.format(
+                    account_backup_table=account_backup_table,
+                    timestamp=timestamp
+                )
+                entity_sql = ENTITY_BACKUP_TABLE_SQL.format(
+                    entity_backup_table=entity_backup_table,
+                    timestamp=timestamp
+                )
+                backup_create_sql = DRY_RUN_BACKUP_TABLES_SQL.format(
+                    account_sql=account_sql,
+                    entity_sql=entity_sql
+                )
                 logger.info(f"```sql\n{backup_create_sql}\n```")
                 
                 # Show backup table schema details
@@ -506,17 +451,12 @@ ADD COLUMN IF NOT EXISTS deletion_batch_id TEXT DEFAULT '{timestamp}';"""
                 # Show backup records SQL
                 logger.info(f"\n📜 DRY RUN: Backup records SQL (first 5 client IDs):")
                 sample_ids_str = ','.join(map(str, client_ids[:5]))
-                backup_insert_sql = f"""-- Backup virtual_account_holder records
-INSERT INTO account.{account_backup_table} 
-SELECT *, NOW(), 'Missing email cleanup', '{timestamp}'
-FROM account.virtual_account_holder
-WHERE person_id IN ({sample_ids_str}...);
-
--- Backup entity records
-INSERT INTO entity.{entity_backup_table} 
-SELECT *, NOW(), 'Missing email cleanup', '{timestamp}'
-FROM entity.entity
-WHERE entity_id IN ({sample_ids_str}...);"""
+                backup_insert_sql = BACKUP_RECORDS_SQL.format(
+                    account_backup_table=account_backup_table,
+                    entity_backup_table=entity_backup_table,
+                    timestamp=timestamp,
+                    sample_ids=sample_ids_str
+                )
                 logger.info(f"```sql\n{backup_insert_sql}\n```")
                 
                 # Show deletion SQL
@@ -532,24 +472,12 @@ WHERE entity_id IN ({sample_ids_str}...);"""
                 
                 # Generate and show rollback script content
                 logger.info(f"\n📜 DRY RUN: Rollback script content that would be written to {rollback_file}:")
-                rollback_content = f"""-- Rollback script for deletion batch: {timestamp}
--- Generated on: {datetime.now().isoformat()}
-
--- Restore deleted virtual_account_holder records
-INSERT INTO account.virtual_account_holder
-SELECT person_id, account_id
-FROM account.{account_backup_table}
-WHERE person_id NOT IN (
-    SELECT person_id FROM account.virtual_account_holder WHERE person_id IS NOT NULL
-);
-
--- Restore deleted entity records
-INSERT INTO entity.entity
-SELECT entity_id, entity_type, entity_subtype, created_at, updated_at, deleted_at
-FROM entity.{entity_backup_table}
-WHERE entity_id NOT IN (
-    SELECT entity_id FROM entity.entity WHERE entity_id IS NOT NULL
-);"""
+                rollback_content = ROLLBACK_SCRIPT_TEMPLATE.format(
+                    batch_id=timestamp,
+                    timestamp=datetime.now().isoformat(),
+                    account_backup_table=account_backup_table,
+                    entity_backup_table=entity_backup_table
+                )
                 logger.info(f"```sql\n{rollback_content}\n```")
                 
                 # Show expected log output
